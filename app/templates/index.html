@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>公交清分数仓 · 换乘标志口径调整影响分析</title>
+<title>公交清分数仓 · 票价口径分批上线联发分析</title>
 <style>
   :root {
     --bg: #f4f6fa;
@@ -38,11 +38,11 @@
   header h1 { margin: 0; font-size: 19px; font-weight: 650; }
   header p { margin: 4px 0 0; opacity: .82; font-size: 13px; }
   .layout {
-    max-width: 1280px;
+    max-width: 1320px;
     margin: 22px auto;
     padding: 0 20px;
     display: grid;
-    grid-template-columns: 340px 1fr;
+    grid-template-columns: 360px 1fr;
     gap: 18px;
     align-items: start;
   }
@@ -71,6 +71,7 @@
     color: #fff;
     font-size: 12px;
     font-weight: 700;
+    flex: none;
   }
   .btn {
     display: inline-flex;
@@ -100,12 +101,27 @@
   .btn-row { display: flex; gap: 8px; }
   .btn-row .btn { flex: 1; }
   .hint { color: var(--muted); font-size: 12px; margin: 8px 0 0; }
+  .upload-slot {
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin-bottom: 10px;
+  }
+  .upload-slot .slot-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 6px;
+    font-weight: 650;
+    font-size: 12.5px;
+  }
+  .upload-slot label.btn { padding: 6px 10px; font-size: 12px; }
   .file-name {
-    margin-top: 8px;
     font-size: 12px;
-    color: var(--ok);
+    color: var(--muted);
     word-break: break-all;
   }
+  .file-name.ok { color: var(--ok); }
   select {
     width: 100%;
     padding: 9px 10px;
@@ -117,48 +133,35 @@
     margin-bottom: 10px;
   }
   select:focus { outline: 2px solid var(--primary-soft); border-color: var(--primary); }
-  .field-list {
-    max-height: 360px;
-    overflow: auto;
+  .model-list {
     border: 1px solid var(--border);
     border-radius: 8px;
-    margin-top: 6px;
+    max-height: 320px;
+    overflow: auto;
   }
-  .table-group { border-bottom: 1px solid var(--border); }
-  .table-group:last-child { border-bottom: none; }
-  .table-title {
-    padding: 8px 12px;
-    background: #f8fafc;
-    font-weight: 650;
-    font-size: 12.5px;
-    color: #344054;
-    position: sticky;
-    top: 0;
+  .model-item {
     display: flex;
-    justify-content: space-between;
-  }
-  .table-title .cnt { color: var(--muted); font-weight: 400; }
-  .field-item {
-    display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 8px;
-    padding: 7px 12px;
+    padding: 9px 12px;
     cursor: pointer;
     border-top: 1px solid #f0f2f6;
   }
-  .field-item:hover { background: var(--primary-soft); }
-  .field-item input { accent-color: var(--primary); }
-  .field-item.target { background: var(--primary-soft); font-weight: 600; }
+  .model-item:first-child { border-top: none; }
+  .model-item:hover { background: var(--primary-soft); }
+  .model-item.selected { background: var(--primary-soft); }
+  .model-item input { margin-top: 3px; accent-color: var(--primary); }
+  .model-item .mname { font-weight: 600; font-size: 13px; }
+  .model-item .mups { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
   .model-chip {
     display: inline-block;
-    padding: 2px 8px;
+    padding: 1px 7px;
     background: #f2f4f7;
-    border-radius: 12px;
-    font-size: 11.5px;
+    border-radius: 10px;
+    font-size: 11px;
     color: #475467;
-    margin: 2px 4px 2px 0;
+    margin: 2px 3px 0 0;
   }
-  .model-chip .arr { color: #98a2b3; margin: 0 3px; }
   .alert {
     border-radius: 8px;
     padding: 10px 12px;
@@ -169,12 +172,8 @@
   }
   .alert-error { background: var(--danger-soft); color: var(--danger); border: 1px solid #fecdca; }
   .alert-info { background: var(--primary-soft); color: #1849a9; border: 1px solid #b2ccff; }
-  .alert-warn { background: var(--warn-soft); color: var(--warn); border: 1px solid #fedf89; }
-  .stats {
-    display: flex;
-    gap: 12px;
-    margin-bottom: 16px;
-  }
+  .alert-ok { background: var(--ok-soft); color: var(--ok); border: 1px solid #abefc6; }
+  .stats { display: flex; gap: 12px; margin-bottom: 16px; }
   .stat {
     flex: 1;
     border: 1px solid var(--border);
@@ -184,6 +183,27 @@
   }
   .stat .num { font-size: 24px; font-weight: 700; color: var(--primary); }
   .stat .lbl { font-size: 12px; color: var(--muted); }
+  .stat.danger .num { color: var(--danger); }
+  .stat.ok .num { color: var(--ok); }
+  .flow-chain {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 16px;
+  }
+  .flow-node {
+    padding: 6px 12px;
+    border-radius: 18px;
+    font-size: 12.5px;
+    font-weight: 600;
+    border: 1px solid var(--border);
+    background: #fff;
+  }
+  .flow-node.target { background: var(--primary); color: #fff; border-color: var(--primary); }
+  .flow-node.corelease { background: var(--warn-soft); color: var(--warn); border-color: #fedf89; }
+  .flow-node.stayed { background: #f2f4f7; color: #667085; }
+  .flow-arrow { color: #98a2b3; font-size: 13px; }
   .model-card {
     border: 1px solid var(--border);
     border-radius: 10px;
@@ -208,60 +228,61 @@
     font-size: 11.5px;
     font-weight: 600;
   }
-  .tag-condition { background: #fef3f2; color: var(--danger); border: 1px solid #fecdca; }
-  .tag-value { background: var(--ok-soft); color: var(--ok); border: 1px solid #abefc6; }
-  .tag-mixed { background: var(--warn-soft); color: var(--warn); border: 1px solid #fedf89; }
-  .col-table { width: 100%; border-collapse: collapse; }
-  .col-table th, .col-table td {
-    text-align: left;
-    padding: 9px 16px;
-    font-size: 13px;
-    border-bottom: 1px solid #f0f2f6;
-    vertical-align: top;
-  }
-  .col-table th {
-    background: #fcfdff;
-    color: var(--muted);
-    font-weight: 600;
-    font-size: 12px;
-  }
-  .col-table tr:last-child td { border-bottom: none; }
-  .col-name { font-family: "SF Mono", Menlo, Consolas, monospace; font-weight: 600; }
-  .path-chain {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-  .path-step {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    font-size: 12px;
-    flex-wrap: wrap;
-  }
-  .path-step .arrow { color: #98a2b3; }
-  .node-ref {
+  .tag-target { background: var(--primary-soft); color: #1849a9; border: 1px solid #b2ccff; }
+  .tag-corelease { background: var(--warn-soft); color: var(--warn); border: 1px solid #fedf89; }
+  .tag-unchanged { background: #f2f4f7; color: #475467; border: 1px solid var(--border); }
+  .tag-a { background: var(--warn-soft); color: var(--warn); border: 1px solid #fedf89; }
+  .tag-b { background: var(--danger-soft); color: var(--danger); border: 1px solid #fecdca; }
+  .tag-ok { background: var(--ok-soft); color: var(--ok); border: 1px solid #abefc6; }
+  .model-body { padding: 14px 16px; }
+  .col-diff { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+  .col-pill {
     font-family: "SF Mono", Menlo, Consolas, monospace;
-    background: #f2f4f7;
-    padding: 1px 7px;
-    border-radius: 6px;
-    color: #344054;
-  }
-  .node-ref.source { background: #ecfdf3; color: #05603a; }
-  .via {
-    font-size: 10.5px;
-    padding: 1px 7px;
+    font-size: 11.5px;
+    padding: 2px 8px;
     border-radius: 10px;
+  }
+  .col-pill.add { background: var(--ok-soft); color: var(--ok); }
+  .col-pill.del { background: var(--danger-soft); color: var(--danger); }
+  .col-pill.same { background: #f2f4f7; color: #667085; }
+  .reason-box {
+    border: 1px solid #fecdca;
+    background: var(--danger-soft);
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin-top: 10px;
+  }
+  .reason-box.a { border-color: #fedf89; background: var(--warn-soft); }
+  .reason-box .rtitle { font-weight: 700; font-size: 12.5px; margin-bottom: 4px; }
+  .reason-box .rmsg { font-size: 12.5px; }
+  .ref-list { margin: 6px 0 0; padding-left: 18px; font-size: 12px; color: #475467; }
+  .ref-list code {
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    background: rgba(0,0,0,.05);
+    padding: 1px 5px;
+    border-radius: 5px;
+  }
+  .clause-badge {
+    display: inline-block;
+    font-size: 10.5px;
     font-weight: 700;
+    padding: 1px 6px;
+    border-radius: 8px;
+    background: #fff;
+    border: 1px solid var(--border);
+    color: #475467;
+    margin-right: 4px;
   }
-  .via.value { background: var(--ok-soft); color: var(--ok); }
-  .via.condition { background: var(--danger-soft); color: var(--danger); }
-  .via.mixed { background: var(--warn-soft); color: var(--warn); }
-  .empty {
-    text-align: center;
-    padding: 48px 20px;
-    color: var(--muted);
+  .edge-table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+  .edge-table th, .edge-table td {
+    text-align: left;
+    padding: 8px 12px;
+    font-size: 12.5px;
+    border-bottom: 1px solid #f0f2f6;
   }
+  .edge-table th { background: #fcfdff; color: var(--muted); font-weight: 600; font-size: 12px; }
+  .mono { font-family: "SF Mono", Menlo, Consolas, monospace; }
+  .empty { text-align: center; padding: 44px 20px; color: var(--muted); }
   .empty .big { font-size: 38px; margin-bottom: 8px; }
   .spinner {
     width: 16px; height: 16px;
@@ -271,15 +292,6 @@
     animation: spin .7s linear infinite;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
-  .meta-line { font-size: 12px; color: var(--muted); margin-top: 6px; }
-  details.deps { margin-top: 6px; }
-  details.deps summary {
-    cursor: pointer;
-    color: var(--primary);
-    font-size: 12px;
-    user-select: none;
-  }
-  .upstream-trees { font-size: 12px; color: #475467; margin-top: 8px; }
   .loading-mask {
     display: none;
     position: fixed;
@@ -301,54 +313,87 @@
     box-shadow: var(--shadow);
   }
   .loading-box .spinner { border-color: #cfd8ec; border-top-color: var(--primary); }
+  textarea.publish-note {
+    width: 100%;
+    min-height: 220px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 12px;
+    line-height: 1.7;
+    resize: vertical;
+    color: var(--text);
+  }
+  .section-title {
+    font-size: 14px;
+    font-weight: 650;
+    margin: 20px 0 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .section-title::before {
+    content: "";
+    width: 4px; height: 16px;
+    background: var(--primary);
+    border-radius: 2px;
+  }
+  .ok-dot { color: var(--ok); font-weight: 700; }
+  .bad-dot { color: var(--danger); font-weight: 700; }
 </style>
 </head>
 <body>
 <header>
-  <h1>公交清分数仓 · 换乘标志口径调整影响分析</h1>
-  <p>基于 SQLGlot 解析 DuckDB SQL，定位待改源表字段影响的模型输出列与依赖路径</p>
+  <h1>公交清分数仓 · 票价口径分批上线最小联发名单分析</h1>
+  <p>仅用 SQLGlot 静态解析 DuckDB SQL（不执行、不连数仓）：比对线上版与候选版，找出拟上线模型必须同批切换的最小模型集合</p>
 </header>
 
 <div class="layout">
-  <!-- 左侧：数据源与字段选择 -->
   <div>
+    <!-- 步骤 1：两版 JSON -->
     <div class="panel">
-      <h2><span class="step-badge">1</span>载入字段清单与模型 SQL</h2>
-      <div class="btn-row">
-        <button class="btn" id="btn-sample">载入清分样例</button>
-        <label class="btn" style="margin:0">
-          上传 JSON
-          <input type="file" id="file-input" accept=".json,application/json" hidden>
-        </label>
+      <h2><span class="step-badge">1</span>上传线上版与候选版模型 JSON</h2>
+      <div class="btn-row" style="margin-bottom:12px">
+        <button class="btn btn-primary" id="btn-sample" style="width:auto;flex:1">载入清分样例（含两版）</button>
       </div>
-      <div class="file-name" id="file-name"></div>
-      <p class="hint">JSON 需包含 <code>source_tables</code>（源表字段清单）与 <code>models</code>（各模型 SQL）两个数组。</p>
-      <div id="model-deps" class="upstream-trees"></div>
+      <div class="upload-slot">
+        <div class="slot-head">
+          <span>线上版（当前生产）</span>
+          <label class="btn">选择文件<input type="file" id="file-online" accept=".json,application/json" hidden></label>
+        </div>
+        <div class="file-name" id="name-online">未上传</div>
+      </div>
+      <div class="upload-slot">
+        <div class="slot-head">
+          <span>候选版（拟发布）</span>
+          <label class="btn">选择文件<input type="file" id="file-candidate" accept=".json,application/json" hidden></label>
+        </div>
+        <div class="file-name" id="name-candidate">未上传</div>
+      </div>
+      <p class="hint">单个文件为含 <code>source_tables</code> 与 <code>models</code> 的版本 JSON；两版须各自通过校验，且源表字段清单、模型名、直接上游一致。</p>
     </div>
 
+    <!-- 步骤 2：选择拟上线模型 -->
     <div class="panel" style="margin-top:16px">
-      <h2><span class="step-badge">2</span>选择待调整字段</h2>
-      <select id="table-select" disabled>
-        <option value="">— 先选择源表 —</option>
-      </select>
-      <div class="field-list" id="field-list">
-        <div class="empty" style="padding:24px">请先载入数据</div>
+      <h2><span class="step-badge">2</span>选择拟上线模型</h2>
+      <div class="model-list" id="model-list">
+        <div class="empty" style="padding:24px">请先载入两版 JSON</div>
       </div>
-      <p class="hint">单选一个源表字段作为口径变更的起点。</p>
-      <button class="btn-primary" id="btn-analyze" disabled style="margin-top:14px">
-        分析受影响模型列
-      </button>
+      <p class="hint">从候选版中选择一个本次拟上线的模型，系统据此求最小联发闭包。</p>
+      <button class="btn-primary" id="btn-analyze" disabled style="margin-top:14px">计算最小联发名单</button>
     </div>
   </div>
 
-  <!-- 右侧：分析结果 -->
+  <!-- 右侧结果 -->
   <div class="panel">
-    <h2><span class="step-badge">3</span>受影响模型列与依赖路径</h2>
+    <h2><span class="step-badge">3</span>联发名单、缺列原因与混用复核</h2>
     <div id="alert-box"></div>
     <div id="result-body">
       <div class="empty">
-        <div class="big">🔍</div>
-        <div>载入 JSON 并选择待调整字段后，在此查看受影响的模型列<br>及每列一条可回溯到源表的依赖路径。</div>
+        <div class="big">🚌</div>
+        <div>上传线上版与候选版 JSON 并选择拟上线模型后，在此查看：<br>
+        同批切换名单、每个追加模型“因哪处引用缺了哪一列”的原因，以及候选/线上双向混用复核。</div>
       </div>
     </div>
   </div>
@@ -360,29 +405,25 @@
 
 <script>
 const $ = (id) => document.getElementById(id);
-let payload = null;
-let schemas = [];
-let modelDeps = [];
-let targetTable = "";
-let targetColumn = "";
+let onlinePayload = null;
+let candidatePayload = null;
+let validateInfo = null;
+let targetModel = "";
 
 function setLoading(on, text) {
   $("loading").classList.toggle("show", on);
   if (text) $("loading-text").textContent = text;
 }
-
 function showAlert(kind, msg) {
   const box = $("alert-box");
   if (!msg) { box.innerHTML = ""; return; }
   const icon = kind === "error" ? "⛔" : kind === "warn" ? "⚠️" : "ℹ️";
-  box.innerHTML = `<div class="alert alert-${kind}"><span>${icon}</span><span>${escapeHtml(msg)}</span></div>`;
+  box.innerHTML = `<div class="alert alert-${kind === "error" ? "error" : kind === "ok" ? "ok" : "info"}"><span>${icon}</span><span>${escapeHtml(msg)}</span></div>`;
 }
-
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
-
 async function postJSON(url, body) {
   const resp = await fetch(url, {
     method: "POST",
@@ -391,128 +432,168 @@ async function postJSON(url, body) {
   });
   return resp.json();
 }
+function extractVersion(data, slot) {
+  if (data && typeof data === "object" && !Array.isArray(data)) {
+    if (Array.isArray(data.source_tables) && Array.isArray(data.models)) return data;
+    if (data.online && data.candidate) return slot === "online" ? data.online : data.candidate;
+  }
+  throw new Error("JSON 需包含 source_tables 与 models 数组（或 online/candidate 两版包装）。");
+}
 
-async function loadPayload(data, label) {
-  payload = data;
-  targetTable = ""; targetColumn = "";
-  $("file-name").textContent = label;
-  showAlert("", "");
-  setLoading(true, "校验 SQL 与字段引用…");
+async function readFile(file, slot) {
+  const text = await file.text();
+  let data;
+  try { data = JSON.parse(text); }
+  catch (err) { throw new Error("JSON 解析失败：" + err.message); }
+  return extractVersion(data, slot);
+}
+
+function setSlotName(slot, label, ok) {
+  const el = $(`name-${slot}`);
+  el.textContent = label;
+  el.classList.toggle("ok", !!ok);
+}
+
+async function reloadAndValidate() {
+  if (!onlinePayload || !candidatePayload) {
+    validateInfo = null;
+    renderModelList();
+    $("btn-analyze").disabled = true;
+    return;
+  }
+  setLoading(true, "校验两版 SQL 与一致性前提…");
   try {
-    const res = await postJSON("/api/validate", payload);
+    const res = await postJSON("/api/validate", {
+      online: onlinePayload, candidate: candidatePayload,
+    });
     if (!res.ok) {
       showAlert("error", res.error);
-      resetWorkspace();
+      validateInfo = null;
+      renderModelList();
+      $("btn-analyze").disabled = true;
+      $("result-body").innerHTML = `<div class="empty"><div class="big">⛔</div><div>校验未通过，请根据上方提示修正后重新上传。</div></div>`;
       return;
     }
-    schemas = res.source_tables;
-    modelDeps = res.models;
-    renderTableSelect();
-    renderModelDeps();
-    renderFieldList();
-    $("btn-analyze").disabled = true;
-    $("result-body").innerHTML = `<div class="empty"><div class="big">✅</div>
-      <div>SQL 校验通过，共 ${schemas.length} 张源表、${modelDeps.length} 个模型。<br>请在左侧选择待调整字段。</div></div>`;
+    validateInfo = res;
+    showAlert("ok", `两版各自校验通过，且源表字段清单、模型名与直接上游一致：共 ${res.source_tables.length} 张源表、${res.models.length} 个模型。`);
+    renderModelList();
+    renderOverview();
   } finally {
     setLoading(false);
   }
 }
 
-function resetWorkspace() {
-  schemas = []; modelDeps = [];
-  $("table-select").innerHTML = '<option value="">— 先选择源表 —</option>';
-  $("table-select").disabled = true;
-  $("field-list").innerHTML = '<div class="empty" style="padding:24px">请先载入数据</div>';
-  $("model-deps").innerHTML = "";
-  $("btn-analyze").disabled = true;
-}
-
-function renderTableSelect() {
-  const sel = $("table-select");
-  sel.innerHTML = '<option value="">— 选择源表 —</option>' +
-    schemas.map(t => `<option value="${escapeHtml(t.table)}">${escapeHtml(t.table)}（${t.columns.length} 列）</option>`).join("");
-  sel.disabled = false;
-  sel.value = "";
-}
-
-function renderModelDeps() {
-  if (!modelDeps.length) { $("model-deps").innerHTML = ""; return; }
-  $("model-deps").innerHTML = "<div style='margin-bottom:6px;color:#667085'>模型读取关系：</div>" +
-    modelDeps.map(m => {
-      const ups = m.upstream.length
-        ? m.upstream.map(u => `<span class="model-chip">${escapeHtml(u)}</span>`).join("")
-        : '<span class="model-chip">仅源表</span>';
-      return `<div style="margin:4px 0"><span class="model-chip" style="background:#e8efff;color:#1849a9">${escapeHtml(m.name)}</span><span class="arr">←</span>${ups}</div>`;
-    }).join("");
-}
-
-function renderFieldList() {
-  const table = $("table-select").value;
-  targetTable = table;
-  const box = $("field-list");
-  if (!table) {
-    box.innerHTML = '<div class="empty" style="padding:24px">请先选择源表</div>';
+function renderModelList() {
+  const box = $("model-list");
+  if (!validateInfo) {
+    box.innerHTML = '<div class="empty" style="padding:24px">请先载入两版 JSON</div>';
     return;
   }
-  const t = schemas.find(x => x.table === table);
-  box.innerHTML = t.columns.map(c =>
-    `<label class="field-item" data-col="${escapeHtml(c)}">
-       <input type="radio" name="target-col" value="${escapeHtml(c)}">
-       <span>${escapeHtml(c)}</span>
-     </label>`).join("");
+  box.innerHTML = validateInfo.models.map(m => `
+    <label class="model-item" data-name="${escapeHtml(m.name)}">
+      <input type="radio" name="target-model" value="${escapeHtml(m.name)}">
+      <div>
+        <div class="mname">${escapeHtml(m.name)}</div>
+        <div class="mups">直接上游：${
+          m.upstream.length ? m.upstream.map(u => `<span class="model-chip">${escapeHtml(u)}</span>`).join("") : '<span class="model-chip">仅源表</span>'
+        }</div>
+      </div>
+    </label>`).join("");
   box.querySelectorAll("input").forEach(inp => {
     inp.addEventListener("change", () => {
-      targetColumn = inp.value;
-      box.querySelectorAll(".field-item").forEach(el =>
-        el.classList.toggle("target", el.dataset.col === targetColumn));
+      targetModel = inp.value;
+      box.querySelectorAll(".model-item").forEach(el =>
+        el.classList.toggle("selected", el.dataset.name === targetModel));
       $("btn-analyze").disabled = false;
     });
   });
 }
 
-$("table-select").addEventListener("change", () => {
-  targetColumn = "";
-  renderFieldList();
-  $("btn-analyze").disabled = true;
-});
+function renderOverview() {
+  const cards = validateInfo.models.map(m => {
+    const adds = m.added_outputs.map(c => `<span class="col-pill add">+ ${escapeHtml(c)}</span>`).join("");
+    const dels = m.removed_outputs.map(c => `<span class="col-pill del">− ${escapeHtml(c)}</span>`).join("");
+    const same = m.online_outputs.filter(c => m.candidate_outputs.includes(c))
+      .map(c => `<span class="col-pill same">${escapeHtml(c)}</span>`).join("");
+    return `
+      <div class="model-card">
+        <div class="model-head">
+          <span class="name">${escapeHtml(m.name)}</span>
+          <span class="meta" style="font-size:12px;color:var(--muted)">两版输出列对比</span>
+        </div>
+        <div class="model-body">
+          <div class="col-diff">${adds}${dels}${same || '<span class="hint" style="margin:0">无输出列</span>'}</div>
+          <div class="hint" style="margin-top:6px">绿色＝候选版新增输出列，红色＝候选版已移除的线上版输出列，灰色＝两版共有。</div>
+        </div>
+      </div>`;
+  }).join("");
+  $("result-body").innerHTML = `
+    <div class="section-title">两版模型输出列差异（校验已通过）</div>
+    ${cards}
+    <div class="empty" style="padding:24px"><div class="big">👈</div><div>在左侧选择一个拟上线模型并点击「计算最小联发名单」。</div></div>`;
+}
 
-$("file-input").addEventListener("change", async (e) => {
+$("file-online").addEventListener("change", async (e) => {
   const file = e.target.files[0];
   if (!file) return;
-  setLoading(true, "读取文件…");
+  setLoading(true, "读取线上版…");
   try {
-    const text = await file.text();
-    let data;
-    try { data = JSON.parse(text); }
-    catch (err) { showAlert("error", "JSON 解析失败：" + err.message); setLoading(false); return; }
-    await loadPayload(data, "已上传：" + file.name);
+    onlinePayload = await readFile(file, "online");
+    setSlotName("online", "已上传：" + file.name, true);
+    await reloadAndValidate();
+  } catch (err) {
+    onlinePayload = null;
+    setSlotName("online", "未上传", false);
+    showAlert("error", "线上版：" + err.message);
   } finally {
     setLoading(false);
     e.target.value = "";
   }
 });
-
+$("file-candidate").addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  setLoading(true, "读取候选版…");
+  try {
+    candidatePayload = await readFile(file, "candidate");
+    setSlotName("candidate", "已上传：" + file.name, true);
+    await reloadAndValidate();
+  } catch (err) {
+    candidatePayload = null;
+    setSlotName("candidate", "未上传", false);
+    showAlert("error", "候选版：" + err.message);
+  } finally {
+    setLoading(false);
+    e.target.value = "";
+  }
+});
 $("btn-sample").addEventListener("click", async () => {
   setLoading(true, "载入清分样例…");
   try {
     const resp = await fetch("/api/sample");
     const data = await resp.json();
-    await loadPayload(data, "清分样例 sample_clearing.json");
+    onlinePayload = extractVersion(data, "online");
+    candidatePayload = extractVersion(data, "candidate");
+    setSlotName("online", "样例线上版（sample_clearing.json）", true);
+    setSlotName("candidate", "样例候选版（sample_clearing.json）", true);
+    await reloadAndValidate();
+  } catch (err) {
+    showAlert("error", err.message);
   } finally {
     setLoading(false);
   }
 });
 
 $("btn-analyze").addEventListener("click", async () => {
-  if (!targetTable || !targetColumn) return;
-  setLoading(true, "血缘传播分析中…");
+  if (!targetModel) return;
+  setLoading(true, "计算最小联发闭包与混用复核…");
   showAlert("", "");
   try {
-    const qs = `table=${encodeURIComponent(targetTable)}&column=${encodeURIComponent(targetColumn)}`;
-    const res = await postJSON("/api/analyze?" + qs, payload);
+    const res = await postJSON(`/api/analyze?model=${encodeURIComponent(targetModel)}`, {
+      online: onlinePayload, candidate: candidatePayload,
+    });
     if (!res.ok) {
       showAlert("error", res.error);
-      $("result-body").innerHTML = `<div class="empty"><div class="big">⛔</div><div>分析已停止，请根据上方提示修正后重试。</div></div>`;
       return;
     }
     renderResult(res.result);
@@ -521,71 +602,146 @@ $("btn-analyze").addEventListener("click", async () => {
   }
 });
 
-function viaTag(via) {
-  const map = { value: ["tag-value", "值依赖"], condition: ["tag-condition", "条件污染"], mixed: ["tag-mixed", "混合"] };
-  const [cls, lbl] = map[via] || ["tag-value", via];
-  return `<span class="tag ${cls}">${lbl}</span>`;
+function roleTag(role) {
+  if (role === "target") return '<span class="tag tag-target">拟上线</span>';
+  if (role === "co_release") return '<span class="tag tag-corelease">同批切换</span>';
+  return '<span class="tag tag-unchanged">沿用线上版</span>';
 }
 
-function renderPath(path) {
-  return `<div class="path-chain">` + path.map((step, i) => {
-    if (step.type === "source") {
-      return `<div class="path-step"><span class="node-ref source">源 ${escapeHtml(step.relation)}.${escapeHtml(step.column)}</span></div>`;
-    }
-    const arrow = i > 0 ? '<span class="arrow">→</span>' : "";
-    const via = step.via ? `<span class="via ${step.via}">${step.via === "value" ? "值传递" : "条件"}</span>` : "";
-    const pred = step.predicate ? `<span class="via condition">${escapeHtml(step.predicate)}</span>` : "";
-    return `<div class="path-step">${arrow}
-      <span class="node-ref">${escapeHtml(step.model)} · ${escapeHtml(step.query)}</span>
-      <span class="node-ref">${escapeHtml(step.input_relation)}.${escapeHtml(step.input_column)}</span>
-      <span class="arrow">→</span><span class="node-ref">${escapeHtml(step.output)}</span>
-      ${via}${pred}</div>`;
-  }).join("") + `</div>`;
+function renderRefs(refs) {
+  return `<ul class="ref-list">` + refs.map(r => `
+    <li><span class="clause-badge">${escapeHtml(r.clause)}</span>
+      查询「${escapeHtml(r.query)}」中 <code>${escapeHtml(r.snippet)}</code>
+      —— 引用限定名 <code>${escapeHtml(r.qualifier)}.${escapeHtml(r.column)}</code></li>`).join("") + `</ul>`;
+}
+
+function renderReasons(reasons) {
+  if (!reasons.length) return "";
+  return reasons.map(r => {
+    const isA = r.violation === "candidate_reads_missing_online";
+    return `
+      <div class="reason-box ${isA ? "a" : ""}">
+        <div class="rtitle">${isA ? "🅰️ 候选模型读旧上游缺列（向上追加）" : "🅱️ 线上模型读新上游缺列（向下追加）"} · 第 ${r.round} 轮</div>
+        <div class="rmsg">${escapeHtml(r.message)}</div>
+        ${renderRefs(r.references)}
+      </div>`;
+  }).join("");
 }
 
 function renderResult(r) {
-  if (!r.affected_models.length) {
-    $("result-body").innerHTML = `<div class="empty"><div class="big">🫙</div>
-      <div>字段 <code>${escapeHtml(r.target.table)}.${escapeHtml(r.target.column)}</code><br>未被任何模型读取，没有受影响的输出列。</div></div>`;
-    return;
-  }
+  const c = r.counts;
   const stats = `
     <div class="stats">
-      <div class="stat"><div class="num">${r.model_count}</div><div class="lbl">受影响模型</div></div>
-      <div class="stat"><div class="num">${r.column_count}</div><div class="lbl">受影响输出列</div></div>
-      <div class="stat"><div class="num">${r.affected_models.filter(m => m.condition_tainted).length}</div><div class="lbl">含条件污染模型</div></div>
-    </div>
-    <div class="alert alert-info">
-      <span>🎯</span>
-      <span>起点字段：<b>${escapeHtml(r.target.table)}.${escapeHtml(r.target.column)}</b>。
-      字段进入 JOIN ON / WHERE（含 IN 子查询）时，该查询及其下游实际读取者的<b>全部输出列</b>按条件污染标出。</span>
+      <div class="stat"><div class="num">${c.total_models}</div><div class="lbl">模型总数</div></div>
+      <div class="stat danger"><div class="num">${c.switched}</div><div class="lbl">同批切换（含拟上线）</div></div>
+      <div class="stat"><div class="num">${c.co_release_added}</div><div class="lbl">额外追加模型</div></div>
+      <div class="stat ok"><div class="num">${c.stayed_online}</div><div class="lbl">可沿用线上版</div></div>
     </div>`;
 
-  const cards = r.affected_models.map(m => `
-    <div class="model-card">
-      <div class="model-head">
-        <span class="name">${escapeHtml(m.model)}</span>
-        <span>
-          ${m.condition_tainted ? '<span class="tag tag-condition">含条件污染</span>' : '<span class="tag tag-value">纯值依赖</span>'}
-          <span class="meta-line" style="display:inline;margin-left:8px">
-            ${m.condition_queries.length ? "命中条件的查询：" + m.condition_queries.map(escapeHtml).join("、") : ""}
-          </span>
-        </span>
-      </div>
-      <table class="col-table">
-        <thead><tr><th style="width:170px">受影响输出列</th><th style="width:90px">依赖方式</th><th>一条依赖路径（回溯至源表）</th></tr></thead>
-        <tbody>
-          ${m.columns.map(c => `
-            <tr>
-              <td class="col-name">${escapeHtml(c.column)}</td>
-              <td>${viaTag(c.via)}</td>
-              <td>${renderPath(c.path)}</td>
-            </tr>`).join("")}
-        </tbody>
-      </table>
-    </div>`).join("");
+  const chain = `
+    <div class="section-title">联发轮次与名单（第 0 轮为拟上线模型）</div>
+    <div class="flow-chain">
+      ${r.release_order.map((name, i) => {
+        const role = name === r.target ? "target" : "corelease";
+        const round = r.models.find(m => m.name === name).round;
+        return `${i > 0 ? '<span class="flow-arrow">→</span>' : ""}
+          <span class="flow-node ${role}">${escapeHtml(name)}（第${round}轮）</span>`;
+      }).join("")}
+      ${r.stayed_online.length ? '<span class="flow-arrow">｜留旧版 →</span>' +
+        r.stayed_online.map(n => `<span class="flow-node stayed">${escapeHtml(n)}</span>`).join("") : ""}
+    </div>`;
 
-  $("result-body").innerHTML = stats + cards;
+  const cards = r.models.map(m => {
+    const adds = m.candidate_outputs.filter(x => !m.online_outputs.includes(x))
+      .map(x => `<span class="col-pill add">+ ${escapeHtml(x)}</span>`).join("");
+    const dels = m.online_outputs.filter(x => !m.candidate_outputs.includes(x))
+      .map(x => `<span class="col-pill del">− ${escapeHtml(x)}</span>`).join("");
+    const same = m.online_outputs.filter(x => m.candidate_outputs.includes(x))
+      .map(x => `<span class="col-pill same">${escapeHtml(x)}</span>`).join("");
+    return `
+      <div class="model-card">
+        <div class="model-head">
+          <span class="name">${escapeHtml(m.name)}</span>
+          <span>${roleTag(m.role)}${m.role === "co_release" ? ` <span style="font-size:12px;color:var(--muted)">第 ${m.round} 轮追加</span>` : ""}</span>
+        </div>
+        <div class="model-body">
+          <div style="font-size:12.5px;color:var(--muted)">直接上游：${
+            m.upstream.length ? m.upstream.map(u => `<span class="model-chip">${escapeHtml(u)}</span>`).join("") : "仅源表"
+          }</div>
+          <div class="col-diff" style="margin-top:8px">${adds}${dels}${same}</div>
+          ${m.role === "target" ? `<div class="hint" style="margin-top:6px">本次拟上线模型，作为联发闭包的起点（第 0 轮）。</div>` : ""}
+          ${renderReasons(m.added_reasons)}
+          ${m.role === "unchanged" ? `<div class="hint" style="margin-top:6px">混用复核未发现该模型与已切换上游之间存在缺列，可继续沿用线上版。</div>` : ""}
+        </div>
+      </div>`;
+  }).join("");
+
+  const edgeRows = r.edge_checks.map(e => `
+    <tr>
+      <td class="mono">${escapeHtml(e.upstream)} → ${escapeHtml(e.downstream)}</td>
+      <td>${e.kind === "candidate_downstream_reads_online_upstream"
+        ? '<span class="tag tag-a">候选下游 读 线上上游</span>'
+        : '<span class="tag tag-b">线上下游 读 候选上游</span>'}</td>
+      <td class="mono" style="max-width:320px">${e.checked_columns.map(escapeHtml).join(", ") || "—"}</td>
+      <td>${e.status === "ok"
+        ? '<span class="ok-dot">✓ 列均存在</span>'
+        : '<span class="bad-dot">✗ 缺列：' + e.missing_columns.map(escapeHtml).join(", ") + "</span>"}</td>
+    </tr>`).join("");
+
+  const verify = `
+    <div class="section-title">混用边界双向复核</div>
+    ${r.verified
+      ? '<div class="alert alert-ok"><span>✅</span><span>所有跨越候选版/线上版边界的模型边均通过检查：候选模型读取的列在旧上游上存在，线上模型读取的列在已切换上游上也存在，不存在读不到列的结算模型。</span></div>'
+      : '<div class="alert alert-error"><span>⛔</span><span>仍有边界边缺列：' + r.residual_errors.map(escapeHtml).join("；") + "</span></div>"}
+    <table class="edge-table">
+      <thead><tr><th>边界边（上游 → 下游）</th><th>检查方向</th><th>跨版本读取的列</th><th>结果</th></tr></thead>
+      <tbody>${edgeRows || '<tr><td colspan="4" style="color:var(--muted)">本次切换不产生跨版本边界边。</td></tr>'}</tbody>
+    </table>`;
+
+  const note = buildPublishNote(r);
+  const noteBlock = `
+    <div class="section-title">发布单填写文本（可直接复制）</div>
+    <textarea class="publish-note" id="publish-note" readonly>${escapeHtml(note)}</textarea>
+    <div class="btn-row" style="margin-top:8px">
+      <button class="btn" id="btn-copy">复制发布单文本</button>
+    </div>`;
+
+  $("result-body").innerHTML = stats + chain + `<div class="section-title">模型逐项说明与追加原因</div>` + cards + verify + noteBlock;
+  $("btn-copy").addEventListener("click", async () => {
+    const ta = $("publish-note");
+    try {
+      await navigator.clipboard.writeText(ta.value);
+      $("btn-copy").textContent = "已复制 ✓";
+      setTimeout(() => ($("btn-copy").textContent = "复制发布单文本"), 1600);
+    } catch (_) {
+      ta.select();
+      document.execCommand("copy");
+    }
+  });
+}
+
+function buildPublishNote(r) {
+  const lines = [];
+  lines.push("【公交清分数仓 · 票价口径联发发布单】");
+  lines.push(`拟上线模型：${r.target}`);
+  lines.push(`同批切换模型（${r.counts.switched} 个，按联发轮次）：`);
+  for (const name of r.release_order) {
+    const m = r.models.find(x => x.name === name);
+    if (name === r.target) {
+      lines.push(`  第0轮 ${name}（拟上线模型）`);
+    } else {
+      lines.push(`  第${m.round}轮 ${name}（追加同批）`);
+    }
+    for (const reason of m.added_reasons) {
+      lines.push(`      - 缺列「${reason.missing_column}」：${reason.message}`);
+      for (const ref of reason.references) {
+        lines.push(`        引用位置：[${ref.clause}] 查询「${ref.query}」 ${ref.snippet}`);
+      }
+    }
+  }
+  lines.push(`沿用线上版模型（${r.counts.stayed_online} 个）：${r.stayed_online.join("、") || "无"}`);
+  lines.push(`混用边界复核：${r.verified ? "全部通过（跨版本边界边 " + r.edge_checks.length + " 条，缺列 0）" : "存在未解决缺列，禁止发布"}`);
+  return lines.join("\n");
 }
 </script>
 </body>

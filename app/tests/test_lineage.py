@@ -1,11 +1,12 @@
-"""lineage.py 测试：传播规则、路径构造、错误处理。"""
+"""lineage.py / release.py 测试：解析校验、一致性前提与最小联发闭包。"""
 import json
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from lineage import AnalysisError, analyze, build_models  # noqa: E402
+from lineage import AnalysisError, build_models  # noqa: E402
+from release import build_version, check_versions, plan_co_release  # noqa: E402
 
 FAILURES = []
 
@@ -17,350 +18,266 @@ def check(name, cond, detail=""):
         FAILURES.append(name)
 
 
-def base_sources():
+def sources():
     return [
-        {"table": "t_a", "columns": ["id", "flag", "val", "grp"]},
+        {"table": "t_a", "columns": ["id", "flag", "val"]},
         {"table": "t_b", "columns": ["id", "name", "amt"]},
     ]
 
 
-def make_payload(models):
-    return {"source_tables": base_sources(), "models": models}
+def payload(models):
+    return {"source_tables": sources(), "models": models}
 
 
-# 1. 纯值依赖：只影响引用列 ----------------------------------------------------------------
-p = make_payload([
-    {"name": "m1", "sql":
-     "SELECT a.id AS id, a.flag AS flag, b.name AS name "
-     "FROM t_a a INNER JOIN t_b b ON a.id = b.id"},
+def model(name, sql):
+    return {"name": name, "sql": sql}
+
+
+# 1. 基本解析：输出列、直接上游、引用位置 -----------------------------------------------------
+p = payload([
+    model("m1", "SELECT a.id AS id, a.flag AS flag FROM t_a a WHERE a.val > 0"),
+    model("m2", "SELECT x.id AS id, x.flag AS flag FROM m1 x INNER JOIN t_b b ON x.id = b.id"),
 ])
-r = analyze(p, "t_a", "flag")
-cols = {c["column"]: c for c in r["affected_models"][0]["columns"]}
-check("值依赖-仅命中引用列", set(cols) == {"flag"}, str(set(cols)))
-check("值依赖-未命中无关列", "name" not in cols and "id" not in cols)
-check("值依赖-via=value", cols["flag"]["via"] == "value")
+_, infos, order = build_models(p)
+check("解析-拓扑序", order == ["m1", "m2"], str(order))
+check("解析-m1输出列", infos["m1"].outputs == ["id", "flag"], str(infos["m1"].outputs))
+check("解析-m2直接上游", infos["m2"].upstream == {"m1"}, str(infos["m2"].upstream))
+clauses = {r.clause for r in infos["m2"].refs}
+check("解析-引用子句齐全", clauses == {"SELECT", "JOIN ON"}, str(clauses))
+check("解析-引用带片段", all(r.snippet for r in infos["m2"].refs))
+check("解析-模型读取只含model类",
+      all(r.source_kind == "model" for refs in infos["m2"].model_reads().values()
+          for rs in refs.values() for r in rs))
+check("解析-model_reads按上游列归集",
+      set(infos["m2"].model_reads()["m1"]) == {"id", "flag"})
 
-# 2. WHERE 条件污染：全部输出列 ----------------------------------------------------------------
-p = make_payload([
-    {"name": "m1", "sql":
-     "SELECT a.id AS id, b.name AS name, a.val AS val "
-     "FROM t_a a INNER JOIN t_b b ON a.id = b.id WHERE a.flag = 1"},
-])
-r = analyze(p, "t_a", "flag")
-m = r["affected_models"][0]
-check("WHERE污染-全部输出列", {c["column"] for c in m["columns"]} == {"id", "name", "val"})
-check("WHERE污染-标记condition_tainted", m["condition_tainted"] is True)
-check("WHERE污染-条件查询名", m["condition_queries"] == ["m1"])
-check("WHERE污染-无关列via=condition",
-      next(c for c in m["columns"] if c["column"] == "name")["via"] == "condition")
+# 2. 旧有 SQL 校验规则保持有效 ----------------------------------------------------------------
+for bad_name, bad_sql, kw in [
+    ("未限定列", "SELECT flag FROM t_a a", "未带表名"),
+    ("星号", "SELECT * FROM t_a a", "星号"),
+    ("LEFT JOIN", "SELECT a.id AS id FROM t_a a LEFT JOIN t_b b ON a.id = b.id", "INNER"),
+    ("逗号连接", "SELECT a.id AS id FROM t_a a, t_b b WHERE a.id = b.id", "INNER"),
+    ("GROUP BY", "SELECT a.id AS id FROM t_a a GROUP BY a.id", "GROUP BY"),
+    ("递归CTE", "WITH RECURSIVE r AS (SELECT a.id AS n FROM t_a a) SELECT r.n AS n FROM r", "递归"),
+    ("未知表", "SELECT x.id AS id FROM t_x x", "t_x"),
+    ("幽灵列", "SELECT a.ghost AS g FROM t_a a", "ghost"),
+]:
+    try:
+        build_models(payload([model("m_bad", bad_sql)]))
+        check(f"校验-{bad_name}报错", False)
+    except AnalysisError as e:
+        check(f"校验-{bad_name}报错", "m_bad" in str(e) and kw in str(e), str(e))
 
-# 3. JOIN ON 条件污染 ----------------------------------------------------------------
-p = make_payload([
-    {"name": "m1", "sql":
-     "SELECT a.id AS id, b.name AS name "
-     "FROM t_a a INNER JOIN t_b b ON a.id = b.id AND a.flag = b.amt"},
-])
-r = analyze(p, "t_a", "flag")
-m = r["affected_models"][0]
-check("JOIN污染-全部输出列", {c["column"] for c in m["columns"]} == {"id", "name"})
-check("JOIN污染-条件标记", m["condition_tainted"] is True)
-
-# 4. 跨模型：下游实际读取才传播；不读取不传播 ----------------------------------------------------------------
-p = make_payload([
-    {"name": "m1", "sql":
-     "SELECT a.id AS id, a.flag AS flag, a.val AS val FROM t_a a"},
-    {"name": "m2", "sql":
-     "SELECT x.id AS id, x.val AS val FROM m1 x"},  # 只读 id/val，不读 flag
-    {"name": "m3", "sql":
-     "SELECT y.flag AS flag FROM m1 y"},            # 读 flag
-])
-r = analyze(p, "t_a", "flag")
-by_model = {m["model"]: m for m in r["affected_models"]}
-check("跨模型-未读取不受影响", "m2" not in by_model)
-check("跨模型-读取者受影响",
-      "m3" in by_model and {c["column"] for c in by_model["m3"]["columns"]} == {"flag"})
-# m3 路径应跨模型回到源表
-path = by_model["m3"]["columns"][0]["path"]
-check("跨模型-路径回到源表",
-      path[0]["type"] == "source" and path[0]["relation"] == "t_a" and path[0]["column"] == "flag")
-check("跨模型-路径含上游模型步骤",
-      any(s.get("input_relation") == "m1" for s in path))
-
-# 5. 条件污染向下游整表传播 ----------------------------------------------------------------
-p = make_payload([
-    {"name": "m1", "sql":
-     "SELECT a.id AS id, a.flag AS flag, b.name AS name "
-     "FROM t_a a INNER JOIN t_b b ON a.id = b.id WHERE a.flag = 1"},
-    {"name": "m2", "sql":
-     "SELECT x.id AS id, x.name AS name FROM m1 x WHERE x.id > 0"},
-])
-r = analyze(p, "t_a", "flag")
-by_model = {m["model"]: m for m in r["affected_models"]}
-check("条件污染下游-全部输出", set(c["column"] for c in by_model["m2"]["columns"]) == {"id", "name"})
-# m2 自身 WHERE 用的是未污染的 id，但上游 m1 的全部输出（含 id）已带条件污染，
-# 因此 m2 根查询的条件集合同样命中；路径中应能看到来自 m1 的 condition 步骤
-check("条件污染下游-m2条件查询被标注", by_model["m2"]["condition_queries"] == ["m2"])
-check("条件污染下游-m2继承condition路径",
-      all(any(s.get("via") == "condition" for s in c["path"])
-          for c in by_model["m2"]["columns"]))
-
-# 6. CTE 内部条件污染 ----------------------------------------------------------------
-p = make_payload([
-    {"name": "m1", "sql":
-     "WITH c1 AS (SELECT a.id AS id, a.flag AS flag FROM t_a a WHERE a.flag = 1) "
-     "SELECT c1.id AS id, c1.flag AS flag FROM c1"},
-])
-r = analyze(p, "t_a", "flag")
-m = r["affected_models"][0]
-check("CTE条件-全部输出", {c["column"] for c in m["columns"]} == {"id", "flag"})
-check("CTE条件-条件查询标注", m["condition_queries"] == ["c1"])
-
-# 7. 多层 CTE 值传递链 ----------------------------------------------------------------
-p = make_payload([
-    {"name": "m1", "sql":
-     "WITH c1 AS (SELECT a.flag AS f1, a.id AS id1 FROM t_a a), "
-     "c2 AS (SELECT c1.f1 AS f2, c1.id1 AS id2 FROM c1) "
-     "SELECT c2.f2 AS out_flag, c2.id2 AS out_id FROM c2"},
-])
-r = analyze(p, "t_a", "flag")
-m = r["affected_models"][0]
-cols = {c["column"]: c for c in m["columns"]}
-check("多层CTE-仅值列受影响", set(cols) == {"out_flag"})
-chain = [s.get("query") for s in cols["out_flag"]["path"] if s["type"] == "node"]
-check("多层CTE-路径经过c1/c2/root", chain == ["c1", "c2", "m1"], str(chain))
-
-# 8. 未限定列名 → 报错并指出模型 ----------------------------------------------------------------
-p = make_payload([{"name": "m_bad", "sql": "SELECT flag FROM t_a a"}])
+# 3. 上游模型幽灵列与循环依赖 ----------------------------------------------------------------
 try:
-    build_models(p)
-    check("未限定列-报错", False)
-except AnalysisError as e:
-    check("未限定列-报错", "m_bad" in str(e) and "未带表名" in str(e), str(e))
-
-# 9. 未知别名 → 报错并指出模型，停止分析 ----------------------------------------------------------------
-p = make_payload([{"name": "m_bad", "sql":
-                  "SELECT z.flag AS flag FROM t_a a INNER JOIN t_b b ON a.id = b.id"}])
-try:
-    build_models(p)
-    check("未知别名-报错", False)
-except AnalysisError as e:
-    check("未知别名-报错", "m_bad" in str(e) and "z" in str(e), str(e))
-
-# 10. 源表不存在的列 → 报错 ----------------------------------------------------------------
-p = make_payload([{"name": "m_bad", "sql": "SELECT a.ghost AS g FROM t_a a"}])
-try:
-    build_models(p)
-    check("幽灵列-报错", False)
-except AnalysisError as e:
-    check("幽灵列-报错", "m_bad" in str(e) and "ghost" in str(e), str(e))
-
-# 11. 上游模型不存在的输出列 → 报错 ----------------------------------------------------------------
-p = make_payload([
-    {"name": "m1", "sql": "SELECT a.id AS id FROM t_a a"},
-    {"name": "m2", "sql": "SELECT x.ghost AS g FROM m1 x"},
-])
-try:
-    build_models(p)
+    build_models(payload([
+        model("m1", "SELECT a.id AS id FROM t_a a"),
+        model("m2", "SELECT x.ghost AS g FROM m1 x"),
+    ]))
     check("上游幽灵列-报错", False)
 except AnalysisError as e:
     check("上游幽灵列-报错", "m2" in str(e) and "ghost" in str(e), str(e))
 
-# 12. 星号 → 报错 ----------------------------------------------------------------
-for bad_sql in ["SELECT * FROM t_a a", "SELECT a.* FROM t_a a"]:
-    p = make_payload([{"name": "m_bad", "sql": bad_sql}])
-    try:
-        build_models(p)
-        check(f"星号报错-{bad_sql}", False)
-    except AnalysisError as e:
-        check(f"星号报错-{bad_sql}", "星号" in str(e), str(e))
-
-# 13. 递归 CTE → 报错 ----------------------------------------------------------------
-p = make_payload([{"name": "m_bad", "sql":
-                  "WITH RECURSIVE r AS (SELECT a.id AS n FROM t_a a) "
-                  "SELECT r.n AS n FROM r"}])
 try:
-    build_models(p)
-    check("递归CTE-报错", False)
-except AnalysisError as e:
-    check("递归CTE-报错", "递归" in str(e), str(e))
-
-# 14. LEFT JOIN → 报错 ----------------------------------------------------------------
-p = make_payload([{"name": "m_bad", "sql":
-                  "SELECT a.id AS id FROM t_a a LEFT JOIN t_b b ON a.id = b.id"}])
-try:
-    build_models(p)
-    check("LEFT JOIN-报错", False)
-except AnalysisError as e:
-    check("LEFT JOIN-报错", "INNER" in str(e), str(e))
-
-# 14b. 逗号隐式连接 → 报错 ----------------------------------------------------------------
-p = make_payload([{"name": "m_bad", "sql":
-                  "SELECT a.id AS id FROM t_a a, t_b b WHERE a.id = b.id"}])
-try:
-    build_models(p)
-    check("逗号连接-报错", False)
-except AnalysisError as e:
-    check("逗号连接-报错", "INNER" in str(e), str(e))
-
-# 14c. SELECT 投影中的标量子查询 → 报错并提示改写 ------------------------------------------
-p = make_payload([{"name": "m_bad", "sql":
-                  "SELECT a.id AS id, (SELECT b.amt AS amt FROM t_b b) AS m FROM t_a a"}])
-try:
-    build_models(p)
-    check("标量子查询-报错", False)
-except AnalysisError as e:
-    check("标量子查询-报错", "标量子查询" in str(e) and "m_bad" in str(e), str(e))
-
-# 15. 未知表 → 报错 ----------------------------------------------------------------
-p = make_payload([{"name": "m_bad", "sql": "SELECT x.id AS id FROM t_x x"}])
-try:
-    build_models(p)
-    check("未知表-报错", False)
-except AnalysisError as e:
-    check("未知表-报错", "t_x" in str(e), str(e))
-
-# 16. 模型循环依赖 → 报错 ----------------------------------------------------------------
-p = make_payload([
-    {"name": "m1", "sql": "SELECT y.id AS id FROM m2 y"},
-    {"name": "m2", "sql": "SELECT x.id AS id FROM m1 x"},
-])
-try:
-    build_models(p)
+    build_models(payload([
+        model("m1", "SELECT y.id AS id FROM m2 y"),
+        model("m2", "SELECT x.id AS id FROM m1 x"),
+    ]))
     check("循环依赖-报错", False)
 except AnalysisError as e:
     check("循环依赖-报错", "循环" in str(e), str(e))
 
-# 17. 非目标字段不产生影响（空结果） ----------------------------------------------------------------
-p = make_payload([
-    {"name": "m1", "sql": "SELECT a.id AS id, b.name AS name "
-                          "FROM t_a a INNER JOIN t_b b ON a.id = b.id"},
-])
-r = analyze(p, "t_a", "val")  # val 没被任何模型读取
-check("未读取字段-零影响", r["model_count"] == 0 and r["column_count"] == 0)
 
-# 18. 目标表/列不存在 ----------------------------------------------------------------
+# 4. 一致性前提：源表清单 / 模型名 / 直接上游 -------------------------------------------------
+def two_chain_payloads():
+    online = payload([
+        model("m1", "SELECT a.id AS id FROM t_a a"),
+        model("m2", "SELECT x.id AS id FROM m1 x"),
+    ])
+    candidate = payload([
+        model("m1", "SELECT a.id AS id, a.val AS val FROM t_a a"),
+        model("m2", "SELECT x.id AS id, x.val AS val FROM m1 x"),
+    ])
+    return online, candidate
+
+
+online, candidate = two_chain_payloads()
+check("前提-一致版本通过", check_versions(build_version(online, "线上版"),
+                                          build_version(candidate, "候选版")) is None)
+
+import copy  # noqa: E402
+
+bad = copy.deepcopy(candidate)
+bad["source_tables"][0]["columns"].append("unused_col")
 try:
-    analyze(make_payload([]), "t_nope", "x")
-    check("目标表不存在-报错", False)
+    plan_co_release(online, bad, "m2")
+    check("前提-源表不一致报错", False)
 except AnalysisError as e:
-    check("目标表不存在-报错", "t_nope" in str(e), str(e))
+    check("前提-源表不一致报错", "源表" in str(e) and "不一致" in str(e), str(e))
 
-# 19. FROM 子查询的依赖与条件污染 ----------------------------------------------------------------
-p = make_payload([
-    {"name": "m1", "sql":
-     "SELECT sq.id AS id, sq.f AS f FROM "
-     "(SELECT a.id AS id, a.flag AS f FROM t_a a WHERE a.flag = 1) sq"},
+bad = copy.deepcopy(candidate)
+bad["models"][1]["name"] = "m2_renamed"
+try:
+    plan_co_release(online, bad, "m2")
+    check("前提-模型名不一致报错", False)
+except AnalysisError as e:
+    check("前提-模型名不一致报错", "模型名集合不一致" in str(e), str(e))
+
+bad = copy.deepcopy(candidate)
+bad["models"][1]["sql"] = ("SELECT x.id AS id, x.val AS val, b.name AS name "
+                           "FROM m1 x INNER JOIN t_b b ON x.id = b.id")
+try:
+    plan_co_release(online, bad, "m2")
+    check("前提-直接上游(源表)不变仍通过", True)
+except AnalysisError as e:  # 源表 JOIN 不改变模型级上游，应当通过
+    check("前提-直接上游(源表)不变仍通过", False, str(e))
+
+# 三模型无环结构下改写 m3 的模型级上游（新增 m1 -> m3 边）
+online3 = payload([
+    model("m1", "SELECT a.id AS id FROM t_a a"),
+    model("m2", "SELECT x.id AS id FROM m1 x"),
+    model("m3", "SELECT y.id AS id FROM m2 y"),
 ])
-r = analyze(p, "t_a", "flag")
-m = r["affected_models"][0]
-check("子查询条件-全部输出", {c["column"] for c in m["columns"]} == {"id", "f"})
-check("子查询条件-标注子查询名", "sq" in m["condition_queries"])
-
-# 20. 非关联 WHERE IN 子查询：子查询内部条件只污染子查询自身输出，
-#     外层查询通过 IN 使用该输出，属于外层 WHERE 条件 -> 外层全部输出被污染
-p = make_payload([
-    {"name": "m1", "sql":
-     "SELECT a.id AS id, a.val AS val FROM t_a a "
-     "WHERE a.id IN (SELECT b.id AS id FROM t_b b WHERE b.amt = 1)"},
+cand3 = payload([
+    model("m1", "SELECT a.id AS id, a.val AS val FROM t_a a"),
+    model("m2", "SELECT x.id AS id, x.val AS val FROM m1 x"),
+    model("m3", "SELECT y.id AS id, x.val AS xval FROM m2 y "
+                 "INNER JOIN m1 x ON y.id = x.id"),
 ])
-r2 = analyze(p, "t_b", "amt")
-m = r2["affected_models"][0]
-check("IN子查询-amt经IN条件污染全输出",
-      {c["column"] for c in m["columns"]} == {"id", "val"})
-# 外层根查询经 IN 谓词命中，内层子查询自身的 WHERE 也命中
-check("IN子查询-外层与子查询均标注",
-      m["condition_queries"] == ["IN 子查询#1", "m1"])
-# t_a.flag 与整条 SQL 无关
-r = analyze(p, "t_a", "flag")
-check("IN子查询-无关字段零影响", r["model_count"] == 0)
+try:
+    plan_co_release(online3, cand3, "m2")
+    check("前提-模型上游不一致报错", False)
+except AnalysisError as e:
+    check("前提-模型上游不一致报错", "直接上游不一致" in str(e), str(e))
 
-# 21. 同一模型内 CTE 输出污染向根传播 ----------------------------------------------------------------
-p = make_payload([
-    {"name": "m1", "sql":
-     "WITH c1 AS (SELECT a.id AS id, a.flag AS flag FROM t_a a WHERE a.flag = 1) "
-     "SELECT c1.id AS id FROM c1"},
+
+# 5. A 类闭包：候选下游读旧上游缺列 -> 上游被迫同批 -------------------------------------------
+online, candidate = two_chain_payloads()
+r = plan_co_release(online, candidate, "m2")
+check("A类-名单含上下游", set(r["release_order"]) == {"m1", "m2"}, str(r["release_order"]))
+check("A类-追加数=1", r["counts"]["co_release_added"] == 1)
+a = next(x for x in r["reasons"] if x["violation"] == "candidate_reads_missing_online")
+check("A类-缺列名为val", a["missing_column"] == "val" and a["added_model"] == "m1", str(a))
+check("A类-原因含引用位置", any("SELECT" in ref["clause"] for ref in a["references"]))
+check("A类-复核通过", r["verified"] is True and not r["residual_errors"])
+
+
+# 6. B 类闭包：线上下游读新上游缺列 -> 下游被迫同批 -------------------------------------------
+online_b = payload([
+    model("m1", "SELECT a.id AS id, a.flag AS flag FROM t_a a"),
+    model("m2", "SELECT x.id AS id, x.flag AS flag FROM m1 x"),
 ])
-r = analyze(p, "t_a", "flag")
-check("CTE污染向根传播", r["affected_models"][0]["columns"][0]["column"] == "id")
+candidate_b = payload([
+    model("m1", "SELECT a.id AS id FROM t_a a"),  # 移除 flag
+    model("m2", "SELECT x.id AS id FROM m1 x"),   # 同步不再读 flag
+])
+r = plan_co_release(online_b, candidate_b, "m1")
+check("B类-名单含上下游", set(r["release_order"]) == {"m1", "m2"}, str(r["release_order"]))
+b = next(x for x in r["reasons"] if x["violation"] == "online_reads_missing_candidate")
+check("B类-缺列名为flag", b["missing_column"] == "flag" and b["added_model"] == "m2", str(b))
+check("B类-复核通过", r["verified"] is True)
 
-# 22. 样例文件可端到端运行 ----------------------------------------------------------------
+
+# 7. 纯新增列可单独上线（最小性） -------------------------------------------------------------
+online_c = payload([model("m1", "SELECT a.id AS id FROM t_a a")])
+candidate_c = payload([model("m1", "SELECT a.id AS id, a.val AS val FROM t_a a")])
+r = plan_co_release(online_c, candidate_c, "m1")
+check("最小性-仅自身切换", r["release_order"] == ["m1"] and r["counts"]["co_release_added"] == 0)
+check("最小性-无追加原因", r["reasons"] == [])
+check("最小性-无边界边", r["edge_checks"] == [])
+
+
+# 8. 多轮扩散：链式三层，目标在中间，一轮内上下游同时拉入 --------------------------------------
+online_d = payload([
+    model("m1", "SELECT a.id AS id FROM t_a a"),
+    model("m2", "SELECT x.id AS id FROM m1 x"),
+    model("m3", "SELECT y.id AS id FROM m2 y"),
+])
+candidate_d = payload([
+    model("m1", "SELECT a.id AS id, a.val AS val FROM t_a a"),
+    model("m2", "SELECT x.id AS id, x.val AS val FROM m1 x"),
+    model("m3", "SELECT y.id AS id FROM m2 y"),
+])
+r = plan_co_release(online_d, candidate_d, "m2")
+# 精确判断：线上 m3 只读 id，候选 m2 仍输出 id，故 m3 可留旧版；m1 因 A 类必须切换
+check("多轮-名单恰为m1m2", set(r["release_order"]) == {"m1", "m2"}, str(r["release_order"]))
+check("多轮-m3可留旧版", "m3" in r["stayed_online"], str(r["stayed_online"]))
+check("多轮-m1被A类拉入",
+      any(x["added_model"] == "m1" and x["violation"] == "candidate_reads_missing_online"
+          for x in r["reasons"]))
+check("多轮-边界边覆盖留旧模型",
+      any(e["downstream"] == "m3" and e["status"] == "ok" for e in r["edge_checks"]))
+
+
+# 9. B 类沿链向下多轮扩散 ---------------------------------------------------------------------
+online_e = payload([
+    model("m1", "SELECT a.id AS id, a.flag AS flag FROM t_a a"),
+    model("m2", "SELECT x.id AS id, x.flag AS flag FROM m1 x"),
+    model("m3", "SELECT y.id AS id, y.flag AS flag FROM m2 y"),
+])
+candidate_e = payload([
+    model("m1", "SELECT a.id AS id FROM t_a a"),
+    model("m2", "SELECT x.id AS id FROM m1 x"),
+    model("m3", "SELECT y.id AS id FROM m2 y"),
+])
+r = plan_co_release(online_e, candidate_e, "m1")
+check("向下扩散-三模型同批", set(r["release_order"]) == {"m1", "m2", "m3"}, str(r["release_order"]))
+check("向下扩散-两轮", r["counts"]["rounds"] == 2, str(r["counts"]))
+b_rounds = sorted(x["round"] for x in r["reasons"]
+                  if x["violation"] == "online_reads_missing_candidate")
+check("向下扩散-B类轮次1和2", b_rounds == [1, 2], str(b_rounds))
+
+
+# 10. 拟上线模型不存在 ------------------------------------------------------------------------
+try:
+    plan_co_release(online_d, candidate_d, "ghost")
+    check("坏目标-报错", False)
+except AnalysisError as e:
+    check("坏目标-报错", "ghost" in str(e), str(e))
+
+
+# 11. 清分样例端到端 --------------------------------------------------------------------------
 sample_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                            "data", "sample_clearing.json")
 with open(sample_path, encoding="utf-8") as fh:
     sample = json.load(fh)
-r = analyze(sample, "ods_card_transaction", "transfer_flag")
-check("样例-3个模型全部受影响", r["model_count"] == 3)
-check("样例-19个输出列受影响", r["column_count"] == 19)
-# 每个路径都能回溯到源表种子
-ok = all(c["path"][0]["type"] == "source"
-         for m in r["affected_models"] for c in m["columns"])
-check("样例-所有路径回到源表", ok)
 
-# 23. 关联子查询 → 报错 ----------------------------------------------------------------
-p = make_payload([{"name": "m_bad", "sql":
-                  "SELECT a.id AS id FROM t_a a WHERE a.id IN "
-                  "(SELECT b.id AS id FROM t_b b WHERE b.amt = a.flag)"}])
-try:
-    build_models(p)
-    check("关联子查询-报错", False)
-except AnalysisError as e:
-    check("关联子查询-报错", "关联" in str(e), str(e))
+r = plan_co_release(sample["online"], sample["candidate"], "dws_line_settlement_detail")
+check("样例-同批3个", r["counts"]["switched"] == 3, str(r["counts"]))
+check("样例-报表留旧版", r["stayed_online"] == ["ads_company_settlement_report"],
+      str(r["stayed_online"]))
+check("样例-追加2个", r["counts"]["co_release_added"] == 2)
+check("样例-3条缺列原因", r["counts"]["reason_count"] == 3, str(r["counts"]))
+kinds = {x["violation"] for x in r["reasons"]}
+check("样例-AB两类都有",
+      kinds == {"candidate_reads_missing_online", "online_reads_missing_candidate"}, str(kinds))
+check("样例-复核通过无残留", r["verified"] is True and r["residual_errors"] == [])
+# 每个追加模型都能对应到原因
+for m in r["models"]:
+    if m["role"] == "co_release":
+        check(f"样例-{m['name']}带原因", len(m["added_reasons"]) >= 1)
+# 原因文案点明缺列与双方模型名
+msg = r["reasons"][0]["message"]
+check("样例-原因文案含列与模型", "「" in msg and "」" in msg and "列" in msg)
 
-# 24. 非关联 EXISTS 子查询：内部条件污染经 EXISTS 扩散到外层全部输出 -----------------------
-p = make_payload([
-    {"name": "m1", "sql":
-     "SELECT a.id AS id, a.val AS val FROM t_a a "
-     "WHERE EXISTS (SELECT b.id AS id FROM t_b b WHERE b.amt = 1)"},
+# 样例中选 dwd（纯新增列）应可单独上线
+r2 = plan_co_release(sample["online"], sample["candidate"], "dwd_card_transaction_detail")
+check("样例-dwd可单独上线", r2["release_order"] == ["dwd_card_transaction_detail"],
+      str(r2["release_order"]))
+
+# 样例中选 ads（两版无变化）闭包只有自己
+r3 = plan_co_release(sample["online"], sample["candidate"], "ads_company_settlement_report")
+check("样例-ads无需联发", r3["release_order"] == ["ads_company_settlement_report"])
+
+# 12. CTE 内部引用同样可解析并归集 -------------------------------------------------------------
+p = payload([
+    model("m1", "WITH c1 AS (SELECT a.id AS id, a.flag AS flag FROM t_a a) "
+                "SELECT c1.id AS id, c1.flag AS flag FROM c1"),
+    model("m2", "SELECT x.id AS id FROM m1 x"),
 ])
-r = analyze(p, "t_b", "amt")
-m = r["affected_models"][0]
-check("EXISTS-条件污染全输出",
-      {c["column"] for c in m["columns"]} == {"id", "val"})
-check("EXISTS-谓词类型标注",
-      any(step.get("predicate") == "EXISTS"
-          for c in m["columns"] for step in c["path"]))
-check("EXISTS-条件查询名",
-      any("EXISTS" in q for q in m["condition_queries"]), str(m["condition_queries"]))
-
-# 25. 关联 EXISTS → 报错 ----------------------------------------------------------------
-p = make_payload([{"name": "m_bad", "sql":
-                  "SELECT a.id AS id FROM t_a a "
-                  "WHERE EXISTS (SELECT b.id AS id FROM t_b b WHERE b.id = a.flag)"}])
-try:
-    build_models(p)
-    check("关联EXISTS-报错", False)
-except AnalysisError as e:
-    check("关联EXISTS-报错", "关联" in str(e), str(e))
-
-# 26. 多上游精确隔离：纯值依赖下，未污染的第三方表列不命中 -------------------------------
-p = make_payload([
-    {"name": "m1", "sql": "SELECT a.id AS id, a.flag AS flag FROM t_a a"},
-    {"name": "m2", "sql":
-     "SELECT x.id AS id, x.flag AS flag, b.amt AS amt "
-     "FROM m1 x INNER JOIN t_b b ON x.id = b.id"},
-])
-r = analyze(p, "t_a", "flag")
-m2 = next(m for m in r["affected_models"] if m["model"] == "m2")
-check("多上游隔离-仅flag命中",
-      {c["column"] for c in m2["columns"]} == {"flag"})
-
-# 27. diamond 依赖：两个分支都读同一上游，汇合模型仍能正确传播且路径回源 -------------------
-p = make_payload([
-    {"name": "m1", "sql": "SELECT a.id AS id, a.flag AS flag FROM t_a a WHERE a.flag = 1"},
-    {"name": "m3", "sql": "SELECT x.id AS id, x.flag AS flag FROM m1 x"},
-    {"name": "m4", "sql": "SELECT y.id AS id, y.flag AS flag FROM m1 y"},
-    {"name": "m5", "sql":
-     "SELECT u.id AS uid, v.flag AS vflag FROM m3 u INNER JOIN m4 v ON u.id = v.id"},
-])
-r = analyze(p, "t_a", "flag")
-names = [m["model"] for m in r["affected_models"]]
-check("diamond-四模型全命中", names == ["m1", "m3", "m4", "m5"])
-m5 = next(m for m in r["affected_models"] if m["model"] == "m5")
-check("diamond-汇合模型全列污染",
-      {c["column"] for c in m5["columns"]} == {"uid", "vflag"})
-check("diamond-路径均回源",
-      all(c["path"][0]["type"] == "source" and c["path"][0]["column"] == "flag"
-          for c in m5["columns"]))
+_, infos, _ = build_models(p)
+check("CTE-引用可解析", {r.column for r in infos["m1"].refs} >= {"id", "flag"})
+check("CTE-m2上游", infos["m2"].upstream == {"m1"})
 
 print()
 if FAILURES:

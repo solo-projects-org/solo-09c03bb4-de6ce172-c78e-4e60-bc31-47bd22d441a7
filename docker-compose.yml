@@ -1,10 +1,10 @@
 services:
-  lineage-web:
+  co-release-web:
     build:
       context: ./app
       dockerfile: Dockerfile
-    image: clearing-lineage-web:latest
-    container_name: clearing-lineage-web
+    image: clearing-corelease-web:latest
+    container_name: clearing-corelease-web
     ports:
       - "8000:8000"
     restart: unless-stopped
